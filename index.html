@@ -26,7 +26,7 @@ const ROOMS = [
   { id: "growth", name: "GROWTH", min: 3, capacity: 20 },
   { id: "engagement", name: "ENGAGEMENT", min: 3, capacity: 20 },
   { id: "contento", name: "CONTENTO", min: 3, capacity: 15 },
-  { id: "cabinaA", name: "CABINA A", min: 2, capacity: 2 },
+  { id: "cabinaA", name: "CABINA A", min: 1, capacity: 1 },
   { id: "cabinaB", name: "CABINA B", min: 1, capacity: 1 },
 ];
 
@@ -44,14 +44,6 @@ const DAYS_ES = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
 function fmtDate(d) { return `${DAYS_ES[d.getDay()]} ${d.getDate()} de ${MONTHS_ES[d.getMonth()]}`; }
 function fmtDateCap(d) { const s = fmtDate(d); return s.charAt(0).toUpperCase() + s.slice(1); }
-function isWeekend(d) { const w = d.getDay(); return w === 0 || w === 6; }
-function addWeekdays(base, n) {
-  const d = new Date(base); let added = 0; const step = n >= 0 ? 1 : -1;
-  while (added < Math.abs(n)) { d.setDate(d.getDate() + step); if (!isWeekend(d)) added++; }
-  return d;
-}
-function startWeekday() { const d = new Date(); while (isWeekend(d)) d.setDate(d.getDate() + 1); return d; }
-function dateKey(d) { return d.toISOString().slice(0, 10); }
 function endTime(startKey, blocks) {
   const idx = SLOTS.findIndex(s => s.key === startKey);
   const next = SLOTS[idx + blocks];
@@ -81,12 +73,13 @@ function buildGCalLink(title, day, startKey, blocks, emails, roomName) {
 }
 
 const RULES = [
-  { title: "Reserva obligatoria", icon: "ti-calendar", text: "Toda sala debe ser reservada con anticipación. No está permitido ocupar salas sin previa reserva." },
-  { title: "Puntualidad", icon: "ti-clock", text: "Las reuniones deben comenzar y finalizar a la hora establecida. Respetar el tiempo asignado es fundamental." },
-  { title: "Uso exclusivo en horario reservado", icon: "ti-lock", text: "No se debe ingresar antes de la hora ni permanecer después del tiempo asignado." },
-  { title: "Capacidad adecuada", icon: "ti-users", text: "Utiliza una sala que se ajuste al número de participantes. Las salas son para 2 o más personas; para llamadas personales usa las cabinas." },
-  { title: "Mantener limpieza y orden", icon: "ti-sparkles", text: "Dejar la sala limpia y ordenada al finalizar. Platos, vasos y utensilios deben dejarse en la cocina." },
-  { title: "Uso responsable del mobiliario", icon: "ti-armchair", text: "Manipular con cuidado muebles, pantallas, proyectores, cables y dispositivos. Reportar cualquier daño inmediatamente." },
+  { title: "Reserva obligatoria", icon: "ti-calendar", text: "Toda sala debe ser reservada con anticipación. No está permitido ocupar salas sin previa reserva. La sala CONTENTO también debe reservarse siempre para mantener visibilidad de su disponibilidad." },
+  { title: "Prioridad de uso", icon: "ti-building", text: "Las salas GROWTH y ENGAGEMENT son prioritarias para reuniones grupales o con clientes. La sala CONTENTO debe dejarse disponible principalmente para grabaciones y generación de contenido." },
+  { title: "1 sola persona → usa los cubículos", icon: "ti-armchair", text: "Cuando sea una sola persona, privilegia el uso de los cubículos disponibles (hay 2). Evita reservar salas para trabajo individual cuando no sea estrictamente necesario." },
+  { title: "Puntualidad", icon: "ti-clock", text: "Las reuniones deben comenzar y finalizar a la hora establecida. Respetar el tiempo asignado es fundamental para una buena convivencia entre equipos." },
+  { title: "Uso exclusivo en horario reservado", icon: "ti-lock", text: "No se debe ingresar antes de la hora ni permanecer después del tiempo asignado. Otras personas podrían estar esperando." },
+  { title: "Mantener limpieza y orden", icon: "ti-sparkles", text: "Dejar la sala limpia y ordenada al finalizar. Platos, vasos y todo lo que se utilizó debe dejarse en la cocina. Tirar basura y dejar todo en su lugar." },
+  { title: "Uso responsable del mobiliario", icon: "ti-device-tv", text: "Manipular con cuidado muebles, pantallas, proyectores, cables y demás dispositivos disponibles. Reportar cualquier daño inmediatamente." },
   { title: "No almacenar objetos personales", icon: "ti-archive-off", text: "Las salas de reuniones no deben utilizarse como espacio de almacenamiento temporal." },
 ];
 
@@ -138,9 +131,8 @@ function Modal({ onClose, children }) {
 }
 
 function App() {
-  const base = startWeekday();
   const [tab, setTab] = useState("reservas");
-  const [dayOffset, setDayOffset] = useState(0);
+  const [pairIdx, setPairIdx] = useState(0);
   const [bookings, setBookings] = useState([]);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({ title:"", emails:[], blocks:2 });
@@ -149,20 +141,40 @@ function App() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelDone, setCancelDone] = useState(false);
 
-  const day1 = dayOffset === 0 ? new Date(base) : addWeekdays(base, dayOffset);
-  const day2 = addWeekdays(day1, 1);
-  const days = [day1, day2];
+  function getWeekdayPairs() {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dow = today.getDay();
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(today); monday.setDate(today.getDate() + diffToMon);
+    const allDays = [];
+    for (let w = 0; w < 2; w++) {
+      for (let d = 0; d < 5; d++) {
+        const day = new Date(monday); day.setDate(monday.getDate() + w*7 + d);
+        allDays.push(day);
+      }
+    }
+    const validDays = allDays.filter(d => d >= today);
+    const pairs = [];
+    for (let i = 0; i < validDays.length - 1; i += 2) pairs.push([validDays[i], validDays[i+1]]);
+    if (validDays.length % 2 !== 0) pairs.push([validDays[validDays.length-1], null]);
+    return pairs;
+  }
 
+  const pairs = getWeekdayPairs();
+  const safeIdx = Math.min(pairIdx, pairs.length - 1);
+  const days = pairs[safeIdx].filter(Boolean);
+
+  function dateKey(d) { return d.toISOString().slice(0,10); }
   function getBooking(roomId, dk, slotKey) {
-    return bookings.find(b => b.roomId === roomId && b.dateKey === dk && b.slotKeys.includes(slotKey));
+    return bookings.find(b => b.roomId===roomId && b.dateKey===dk && b.slotKeys.includes(slotKey));
   }
   function slotsFrom(startKey, count) {
-    const idx = SLOTS.findIndex(s => s.key === startKey);
-    return idx < 0 ? [] : SLOTS.slice(idx, idx + count).map(s => s.key);
+    const idx = SLOTS.findIndex(s => s.key===startKey);
+    return idx < 0 ? [] : SLOTS.slice(idx, idx+count).map(s => s.key);
   }
   function openCell(room, day, slot) {
     const dk = dateKey(day);
-    const existing = bookings.find(b => b.roomId === room.id && b.dateKey === dk && b.slotKeys.includes(slot.key));
+    const existing = bookings.find(b => b.roomId===room.id && b.dateKey===dk && b.slotKeys.includes(slot.key));
     if (existing) { setCancelTarget(existing); setCancelDone(false); return; }
     setForm({ title:"", emails:[], blocks:2 }); setError(""); setGcalLink(null);
     setModal({ room, day, slot });
@@ -175,12 +187,12 @@ function App() {
     const keys = slotsFrom(slot.key, form.blocks);
     if (keys.length < form.blocks) { setError("La reserva excede el horario disponible (18:30)."); return; }
     for (const k of keys) {
-      if (bookings.find(b => b.roomId === room.id && b.dateKey === dk && b.slotKeys.includes(k))) { setError("Uno o más bloques ya están ocupados."); return; }
+      if (bookings.find(b => b.roomId===room.id && b.dateKey===dk && b.slotKeys.includes(k))) { setError("Uno o más bloques ya están ocupados."); return; }
     }
     setGcalLink(buildGCalLink(form.title.trim(), day, slot.key, form.blocks, form.emails, room.name));
     setBookings(prev => [...prev, { id:Date.now(), roomId:room.id, dateKey:dk, slotKeys:keys, startKey:slot.key, blocks:form.blocks, title:form.title.trim(), emails:form.emails }]);
   }
-  function doCancel() { setBookings(prev => prev.filter(b => b.id !== cancelTarget.id)); setCancelDone(true); }
+  function doCancel() { setBookings(prev => prev.filter(b => b.id!==cancelTarget.id)); setCancelDone(true); }
 
   const durOpts = [
     { blocks:1, label:"30 min" }, { blocks:2, label:"1 hora" },
@@ -205,7 +217,11 @@ function App() {
           </div>
         </div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          {ROOMS.map(r => <span key={r.id} style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20 }}>{r.name}</span>)}
+          <span style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20, whiteSpace:"nowrap" }}>Sala 1 · GROWTH</span>
+          <span style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20, whiteSpace:"nowrap" }}>Sala 2 · ENGAGEMENT</span>
+          <span style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20, whiteSpace:"nowrap" }}>CONTENTO</span>
+          <span style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20, whiteSpace:"nowrap" }}>CABINA A</span>
+          <span style={{ fontSize:11, color:"#bfdbfe", background:"rgba(255,255,255,0.08)", padding:"3px 10px", borderRadius:20, whiteSpace:"nowrap" }}>CABINA B</span>
         </div>
       </div>
 
@@ -219,22 +235,23 @@ function App() {
 
       {tab === "reservas" && (
         <>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, flexWrap:"wrap" }}>
-            <button onClick={() => setDayOffset(o => o-1)} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:15 }}><i className="ti ti-chevron-left"></i></button>
-            <span style={{ fontSize:13, color:"#6b7280" }}>{dayOffset===0?"Esta semana":""}</span>
-            <button onClick={() => setDayOffset(o => o+1)} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:15 }}><i className="ti ti-chevron-right"></i></button>
-            {dayOffset !== 0 && <button onClick={() => setDayOffset(0)} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, height:30, padding:"0 10px", cursor:"pointer", color:"#6b7280", fontSize:12 }}>Hoy</button>}
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+            <button onClick={() => setPairIdx(i => Math.max(0, i-1))} disabled={safeIdx===0} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, width:30, height:30, cursor:safeIdx===0?"not-allowed":"pointer", fontSize:15, opacity:safeIdx===0?0.3:1 }}><i className="ti ti-chevron-left"></i></button>
+            <span style={{ fontSize:13, color:"#6b7280", minWidth:80, textAlign:"center" }}>{safeIdx===0?"Esta semana":"Próxima semana"}</span>
+            <button onClick={() => setPairIdx(i => Math.min(pairs.length-1, i+1))} disabled={safeIdx>=pairs.length-1} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, width:30, height:30, cursor:safeIdx>=pairs.length-1?"not-allowed":"pointer", fontSize:15, opacity:safeIdx>=pairs.length-1?0.3:1 }}><i className="ti ti-chevron-right"></i></button>
+            {safeIdx!==0 && <button onClick={() => setPairIdx(0)} style={{ border:"1px solid #d1d5db", background:"#fff", borderRadius:8, height:30, padding:"0 10px", cursor:"pointer", color:"#6b7280", fontSize:12 }}>Hoy</button>}
           </div>
+
           <div style={{ overflowX:"auto" }}>
             <table style={{ borderCollapse:"collapse", width:"100%", minWidth:620, fontSize:12 }}>
               <thead>
                 <tr style={{ background:"#0e1a2b" }}>
                   <th rowSpan={2} style={{ padding:"8px 12px", color:"#7dd3fc", fontWeight:500, fontSize:12, textAlign:"left", borderRight:"1px solid #1e3a5f", whiteSpace:"nowrap", verticalAlign:"middle" }}>HORARIO</th>
-                  {ROOMS.map(room => <th key={room.id} colSpan={2} style={{ padding:"6px 4px", color:"#fff", fontWeight:500, fontSize:12, textAlign:"center", borderRight:"1px solid #1e3a5f", borderBottom:"1px solid #1e3a5f" }}>{room.name}</th>)}
+                  {ROOMS.map(room => <th key={room.id} colSpan={days.length} style={{ padding:"6px 4px", color:"#fff", fontWeight:500, fontSize:12, textAlign:"center", borderRight:"1px solid #1e3a5f", borderBottom:"1px solid #1e3a5f" }}>{room.name}</th>)}
                 </tr>
                 <tr style={{ background:"#0f2744" }}>
                   {ROOMS.map(room => days.map((day, di) => (
-                    <th key={`${room.id}-${di}`} style={{ padding:"5px 4px", color:"#93c5fd", fontWeight:400, fontSize:11, textAlign:"center", borderRight:di===1?"1px solid #1e3a5f":"0.5px solid #1e3a5f", whiteSpace:"nowrap" }}>{fmtDateCap(day)}</th>
+                    <th key={`${room.id}-${di}`} style={{ padding:"5px 4px", color:"#93c5fd", fontWeight:400, fontSize:11, textAlign:"center", borderRight:di===days.length-1?"1px solid #1e3a5f":"0.5px solid #1e3a5f", whiteSpace:"nowrap" }}>{fmtDateCap(day)}</th>
                   )))}
                 </tr>
               </thead>
@@ -245,10 +262,10 @@ function App() {
                     {ROOMS.map(room => days.map((day, di) => {
                       const dk = dateKey(day);
                       const bk = getBooking(room.id, dk, slot.key);
-                      const first = bk && bk.slotKeys[0] === slot.key;
+                      const first = bk && bk.slotKeys[0]===slot.key;
                       return (
                         <td key={`${room.id}-${di}`} onClick={() => openCell(room, day, slot)}
-                          style={{ border:"0.5px solid #e5e7eb", borderRight:di===1?"1px solid #d1d5db":"0.5px solid #e5e7eb", cursor:"pointer", height:26, minWidth:90, verticalAlign:"middle", textAlign:"center", background:bk?SLOT_COLOR:"transparent", padding:first?"3px 5px":0 }}>
+                          style={{ border:"0.5px solid #e5e7eb", borderRight:di===days.length-1?"1px solid #d1d5db":"0.5px solid #e5e7eb", cursor:"pointer", height:26, minWidth:90, verticalAlign:"middle", textAlign:"center", background:bk?SLOT_COLOR:"transparent", padding:first?"3px 5px":0 }}>
                           {first && <div style={{ fontSize:11, fontWeight:500, color:SLOT_TEXT, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis", maxWidth:88 }}>{bk.title}</div>}
                         </td>
                       );
@@ -288,7 +305,13 @@ function App() {
           ) : (
             <>
               <p style={{ fontSize:16, fontWeight:500, margin:"0 0 4px", color:"#111827" }}>Reservar {modal.room.name}</p>
-              <p style={{ fontSize:13, color:"#6b7280", margin:"0 0 1rem" }}>{fmtDateCap(modal.day)} · desde {modal.slot.key.split(":").map(p=>String(p).padStart(2,"0")).join(":")} · mín {modal.room.min} asistentes</p>
+              <p style={{ fontSize:13, color:"#6b7280", margin:"0 0 0.5rem" }}>{fmtDateCap(modal.day)} · desde {modal.slot.key.split(":").map(p=>String(p).padStart(2,"0")).join(":")} · mín {modal.room.min} asistente{modal.room.min>1?"s":""}</p>
+              {modal.room.id === "contento" && (
+                <div style={{ background:"#fef3c7", border:"1px solid #d97706", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#92400e", marginBottom:12 }}>
+                  <i className="ti ti-alert-triangle" style={{ marginRight:5 }}></i>
+                  La sala CONTENTO es prioritaria para <strong>grabaciones y contenido</strong>. Úsala para reuniones solo si GROWTH y ENGAGEMENT están ocupadas.
+                </div>
+              )}
               <label style={{ display:"block", fontSize:13, color:"#374151", marginBottom:4 }}>Nombre de la reunión</label>
               <input type="text" placeholder="Ej: Reunión IKEA, Planning Q3..." value={form.title} onChange={e => setForm(f => ({ ...f, title:e.target.value }))} />
               <label style={{ display:"block", fontSize:13, color:"#374151", marginBottom:4, marginTop:12 }}>Correos · mín {modal.room.min} — presiona Enter para agregar</label>
@@ -328,7 +351,7 @@ function App() {
               <p style={{ fontSize:16, fontWeight:500, margin:"0 0 4px", color:"#111827" }}>Cancelar reserva</p>
               <div style={{ fontSize:13, color:"#6b7280", margin:"0.25rem 0 0.75rem", lineHeight:1.8 }}>
                 <div><strong style={{ color:"#111827" }}>{cancelTarget.title}</strong></div>
-                <div>{ROOMS.find(r => r.id===cancelTarget.roomId)?.name} · {cancelTarget.startKey.split(":").map(p=>String(p).padStart(2,"0")).join(":")} — {endTime(cancelTarget.startKey, cancelTarget.blocks)}</div>
+                <div>{ROOMS.find(r=>r.id===cancelTarget.roomId)?.name} · {cancelTarget.startKey.split(":").map(p=>String(p).padStart(2,"0")).join(":")} — {endTime(cancelTarget.startKey, cancelTarget.blocks)}</div>
                 {cancelTarget.emails?.length > 0 && <div style={{ fontSize:12 }}>{cancelTarget.emails.join(", ")}</div>}
               </div>
               <div style={{ background:"#fef3c7", border:"1px solid #d97706", borderRadius:8, padding:"8px 12px", fontSize:12, color:"#92400e", marginBottom:14 }}>
